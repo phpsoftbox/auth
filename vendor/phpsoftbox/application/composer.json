@@ -1,0 +1,47 @@
+{
+    "name": "phpsoftbox/application",
+    "description": "Application core for the PhpSoftBox framework",
+    "type": "library",
+    "license": "MIT",
+    "authors": [
+        {
+            "name": "Anton K.",
+            "email": "inspector-who@mail.ru"
+        }
+    ],
+    "config": {
+        "sort-packages": true
+    },
+    "require": {
+        "php": "^8.4",
+        "phpsoftbox/http-emitter": "dev-master",
+        "phpsoftbox/http-message": "dev-master",
+        "phpsoftbox/rate-limiter": "dev-master",
+        "psr/container": "^2.0",
+        "psr/http-message": "^2.0",
+        "psr/http-factory": "^1.0",
+        "psr/http-server-handler": "^1.0",
+        "psr/http-server-middleware": "^1.0",
+        "phpsoftbox/router": "dev-master"
+    },
+    "require-dev": {
+        "phpunit/phpunit": "^11.2"
+    },
+    "autoload": {
+        "psr-4": {
+            "PhpSoftBox\\Application\\": "src/"
+        }
+    },
+    "autoload-dev": {
+        "psr-4": {
+            "PhpSoftBox\\Application\\Tests\\": "tests/"
+        }
+    },
+    "scripts": {
+        "test": "phpunit",
+        "cs:fix": "vendor/bin/psb-cs-fixer fix",
+        "cs:check": "vendor/bin/psb-cs-fixer check --diff"
+    },
+    "minimum-stability": "dev",
+    "prefer-stable": true
+}
