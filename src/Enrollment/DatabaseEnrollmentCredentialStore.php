@@ -198,11 +198,13 @@ final class DatabaseEnrollmentCredentialStore implements EnrollmentCredentialSto
     {
         $lock = $conn->driver()->name() === 'sqlite' ? '' : ' FOR UPDATE';
         $sql  = sprintf(
-            'SELECT *
-            FROM %s
-            WHERE %s = :selector
-              AND %s = :audience
-            LIMIT 1%s',
+            '
+                SELECT *
+                FROM %s
+                WHERE %s = :selector
+                    AND %s = :audience
+                LIMIT 1%s
+            ',
             $conn->table($this->table),
             $this->selectorColumn,
             $this->audienceColumn,
