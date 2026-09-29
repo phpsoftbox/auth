@@ -23,7 +23,12 @@ final class DatabasePermissionStore implements PermissionStoreInterface, Transac
     {
         $conn = $this->connections->read($this->connectionName);
         $row  = $conn->fetchOne(
-            "SELECT id, {$this->labelField} FROM {$this->table} WHERE {$this->nameField} = :name LIMIT 1",
+            "
+                SELECT id, {$this->labelField}
+                FROM {$this->table}
+                WHERE {$this->nameField} = :name
+                LIMIT 1
+            ",
             ['name' => $name],
         );
 

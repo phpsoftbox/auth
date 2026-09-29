@@ -23,6 +23,7 @@ final class UserRoleManager
     public function __construct(
         private readonly UserRoleStoreInterface $userRoles,
         private readonly RoleStoreInterface $roles,
+        private readonly ?PermissionCacheInterface $permissionCache = null,
     ) {
     }
 
@@ -93,6 +94,7 @@ final class UserRoleManager
         if ($roleNames === []) {
             if ($replace) {
                 $this->userRoles->detachAll($userId);
+                $this->permissionCache?->forgetUser($userId);
             }
 
             return;
@@ -106,6 +108,8 @@ final class UserRoleManager
                 $this->userRoles->attach($userId, $roleId);
             }
 
+            $this->permissionCache?->forgetUser($userId);
+
             return;
         }
 
@@ -115,6 +119,8 @@ final class UserRoleManager
         foreach ($toAttach as $roleId) {
             $this->userRoles->attach($userId, $roleId);
         }
+
+        $this->permissionCache?->forgetUser($userId);
     }
 
     /**
@@ -129,6 +135,7 @@ final class UserRoleManager
         }
 
         $this->userRoles->detach($userId, $roleId);
+        $this->permissionCache?->forgetUser($userId);
     }
 
     /**

@@ -22,6 +22,7 @@ final readonly class RememberRestoreMiddleware implements MiddlewareInterface
         private RememberCookieManager $cookies,
         private RememberMismatchPolicy $mismatchPolicy = RememberMismatchPolicy::RevokeToken,
         private string $userAttribute = 'user',
+        private ?string $area = null,
     ) {
     }
 
@@ -34,6 +35,12 @@ final readonly class RememberRestoreMiddleware implements MiddlewareInterface
         }
 
         $record = $this->tokens->findValid($rawToken, $request);
+
+        // Если задан guard (`area`), токен другого guard не принимается.
+        if ($record !== null && $this->area !== null && ($record->metadata['area'] ?? null) !== $this->area) {
+            $record = null;
+        }
+
         if ($record === null) {
             $this->cookies->queueForget($request);
 
@@ -62,6 +69,9 @@ final readonly class RememberRestoreMiddleware implements MiddlewareInterface
         }
 
         $this->guard->login($user);
+
+        $rotated = $this->tokens->rotate($rawToken, $record, $request);
+        $this->cookies->queue($rotated->token, $record->expiresAt, $request);
 
         return $handler->handle($this->withUser($request, $user));
     }

@@ -73,7 +73,16 @@ guard не сконфигурирован, сервис бросает `InvalidA
 добавляет metadata из `RememberGuardConfig`. Поле `area` нельзя переопределить
 через config metadata. Raw-token в базе не хранится:
 `DatabaseRememberTokenStore` использует безопасный формат `selector.secret`,
-хранит hash секрета и пишет `token_type = remember`.
+хранит hash секрета и пишет `token_type = user_remember`.
+
+`restore()` принимает токен, только если его `area` совпадает с guard: токен `web`, подставленный в cookie
+`remember_site`, не авторизует пользователя `site` с тем же id. Чтобы токены разных guard не находились друг другом
+вовсе, задайте каждому `DatabaseRememberTokenStore` свой `audience` (например, `audience: 'web'` и
+`audience: 'site'`). `RememberRestoreMiddleware` проверяет `area`, если ему передан параметр `area`.
+
+При восстановлении входа токен ротируется: пользователь получает новый токен с тем же сроком, а использованный
+действует ещё 60 секунд (`DatabaseRememberTokenStore::ROTATION_GRACE_SECONDS`) — параллельные запросы той же вкладки
+не разлогинивают. Украденный и уже использованный токен перестаёт работать через минуту.
 
 ## IntendedUrlStore
 

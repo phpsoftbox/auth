@@ -37,6 +37,7 @@ use const PASSWORD_DEFAULT;
 #[CoversClass(RememberGuardConfig::class)]
 #[CoversMethod(MultiGuardRememberService::class, 'issue')]
 #[CoversMethod(MultiGuardRememberService::class, 'restore')]
+#[CoversMethod(DatabaseRememberTokenStore::class, 'rotate')]
 #[CoversMethod(MultiGuardRememberService::class, 'forget')]
 final class MultiGuardRememberServiceTest extends TestCase
 {
@@ -91,7 +92,8 @@ final class MultiGuardRememberServiceTest extends TestCase
         $queue = new CookieQueue();
 
         $config = $this->guardConfig($manager, $queue, 'tenant_remember');
-        $issued = $config->store->issue(20, new DateTimeImmutable('2026-02-01 00:00:00 UTC'));
+        // Токен выдан для guard `tenant` — так его выдаёт MultiGuardRememberService::issue().
+        $issued = $config->store->issue(20, new DateTimeImmutable('2026-02-01 00:00:00 UTC'), ['area' => 'tenant']);
 
         $service = new MultiGuardRememberService(true, 30, [
             'tenant' => $config,
@@ -155,6 +157,72 @@ final class MultiGuardRememberServiceTest extends TestCase
         $this->expectExceptionMessage('Remember guard is not configured');
 
         $service->issue('missing', 10, new ServerRequest('GET', 'https://example.test/'));
+    }
+
+    /**
+     * Проверим, что remember-токен одного guard, подставленный в cookie другого, не авторизует пользователя с тем же
+     * id во втором guard.
+     *
+     * @see MultiGuardRememberService::restore()
+     */
+    #[Test]
+    public function restoreRejectsTokenOfAnotherGuard(): void
+    {
+        Clock::freeze(new DateTimeImmutable('2026-01-01 00:00:00 UTC'));
+
+        $manager = $this->connectionManager();
+        $this->createTokenTable($manager);
+
+        $queue = new CookieQueue();
+
+        $web     = $this->guardConfig($manager, $queue, 'remember_web');
+        $site    = $this->guardConfig($manager, $queue, 'remember_site');
+        $service = new MultiGuardRememberService(true, 30, ['web' => $web, 'site' => $site]);
+
+        // Токен выдан guard `web`, но подставлен в cookie guard `site`.
+        $webToken = $web->store->issue(20, new DateTimeImmutable('2026-02-01 00:00:00 UTC'), ['area' => 'web']);
+
+        $restored = $service->restore(
+            'site',
+            new ServerRequest('GET', 'https://example.test/', cookieParams: ['remember_site' => $webToken->token]),
+        );
+
+        self::assertFalse($restored);
+        self::assertNull($site->guard->user(new ServerRequest('GET', 'https://example.test/')));
+    }
+
+    /**
+     * Проверим, что при восстановлении входа выдаётся новый токен, а использованный действует ещё 60 секунд.
+     *
+     * @see MultiGuardRememberService::restore()
+     * @see DatabaseRememberTokenStore::rotate()
+     */
+    #[Test]
+    public function restoreRotatesUsedToken(): void
+    {
+        Clock::freeze(new DateTimeImmutable('2026-01-01 00:00:00 UTC'));
+
+        $manager = $this->connectionManager();
+        $this->createTokenTable($manager);
+
+        $queue = new CookieQueue();
+
+        $config  = $this->guardConfig($manager, $queue, 'tenant_remember');
+        $service = new MultiGuardRememberService(true, 30, ['tenant' => $config]);
+        $issued  = $config->store->issue(20, new DateTimeImmutable('2026-02-01 00:00:00 UTC'), ['area' => 'tenant']);
+
+        $service->restore('tenant', new ServerRequest('GET', 'https://example.test/', cookieParams: ['tenant_remember' => $issued->token]));
+
+        // В ответ ушёл новый токен.
+        $cookies = $queue->flush();
+        self::assertCount(1, $cookies);
+        self::assertNotSame($issued->token, $cookies[0]->value());
+        self::assertNotNull($config->store->findValid($cookies[0]->value()));
+
+        // Использованный токен действует минуту, потом — нет.
+        self::assertNotNull($config->store->findValid($issued->token));
+        Clock::freeze(new DateTimeImmutable('2026-01-01 00:01:01 UTC'));
+        self::assertNull($config->store->findValid($issued->token));
     }
 
     private function guardConfig(ConnectionManager $manager, CookieQueue $queue, string $cookieName): RememberGuardConfig

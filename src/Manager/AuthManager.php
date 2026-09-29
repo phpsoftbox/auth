@@ -12,7 +12,6 @@ use PhpSoftBox\Auth\Authorization\PermissionDecisionCheckerInterface;
 use PhpSoftBox\Auth\Authorization\PermissionName;
 use PhpSoftBox\Auth\Guard\GuardInterface;
 use Psr\Container\ContainerInterface;
-use Throwable;
 
 use function class_exists;
 use function get_debug_type;
@@ -109,15 +108,10 @@ final class AuthManager
         }
 
         if (is_string($guard) && class_exists($guard)) {
-            if ($this->container !== null) {
-                try {
-                    $instance = $this->container->get($guard);
-                } catch (Throwable) {
-                    $instance = new $guard();
-                }
-            } else {
-                $instance = new $guard();
-            }
+            // Ошибка сборки guard в контейнере не маскируется созданием guard без зависимостей.
+            $instance = $this->container?->has($guard) === true
+                ? $this->container->get($guard)
+                : new $guard();
             if (!$instance instanceof GuardInterface) {
                 $type = get_debug_type($instance);
 

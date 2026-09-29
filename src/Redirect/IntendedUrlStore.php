@@ -9,6 +9,7 @@ use Psr\Http\Message\ServerRequestInterface;
 
 use function in_array;
 use function is_string;
+use function preg_match;
 use function str_starts_with;
 use function strtoupper;
 use function trim;
@@ -39,13 +40,9 @@ final readonly class IntendedUrlStore
     public function pull(string $fallback): string
     {
         $intended = $this->session->get($this->key);
-        if (is_string($intended) && trim($intended) !== '') {
-            $this->session->forget($this->key);
+        $this->session->forget($this->key);
 
-            return $intended;
-        }
-
-        return $fallback;
+        return is_string($intended) && $this->isLocalPath($intended) ? $intended : $fallback;
     }
 
     public function forget(): void
@@ -60,7 +57,7 @@ final readonly class IntendedUrlStore
         }
 
         $path = $this->path($request);
-        if (in_array($path, $this->excludePaths, true)) {
+        if (!$this->isLocalPath($path) || in_array($path, $this->excludePaths, true)) {
             return false;
         }
 
@@ -72,6 +69,17 @@ final readonly class IntendedUrlStore
         }
 
         return true;
+    }
+
+    /**
+     * Только путь внутри сайта: `//evil.com/x` и `/\\evil.com` браузер понимает как адрес другого хоста.
+     */
+    private function isLocalPath(string $url): bool
+    {
+        return str_starts_with($url, '/')
+            && !str_starts_with($url, '//')
+            && !str_starts_with($url, '/\\')
+            && preg_match('/[\x00-\x1F\x7F]/', $url) !== 1;
     }
 
     private function url(ServerRequestInterface $request): string

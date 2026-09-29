@@ -2,7 +2,9 @@
 
 `AccountProtectionService` ограничивает перебор и abuse в auth-формах:
 
-- считает попытки по IP + scope;
+- считает попытки по IP + scope; IP — только `REMOTE_ADDR` (за прокси реальный IP туда подставляет
+  `TrustedProxyMiddleware` из `phpsoftbox/application`, заголовки `X-Forwarded-For`/`X-Real-Ip` не читаются);
+- без ключей CAPTCHA не требуется: пройти её нельзя, и вход блокировался бы по IP;
 - после порога включает обязательную CAPTCHA;
 - хранит состояние в `CacheInterface`;
 - проверяет CAPTCHA через `CaptchaVerifierInterface`;

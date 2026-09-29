@@ -8,11 +8,24 @@ use DateTimeInterface;
 use PhpSoftBox\Auth\Token\CredentialRecord;
 use PhpSoftBox\Auth\Token\DatabaseCredentialStore;
 use PhpSoftBox\Auth\Token\IssuedCredential;
+use PhpSoftBox\Clock\Clock;
 use PhpSoftBox\Database\Connection\ConnectionManagerInterface;
 use Psr\Http\Message\ServerRequestInterface;
 
+use function sprintf;
+
+/**
+ * Remember-токены поверх {@see DatabaseCredentialStore}.
+ *
+ * `audience` отделяет токены разных guard в одной таблице: токен одного guard в store другого не находится.
+ */
 final readonly class DatabaseRememberTokenStore
 {
+    /**
+     * Сколько секунд старый токен действует после ротации: параллельные запросы той же вкладки не должны разлогинить.
+     */
+    public const int ROTATION_GRACE_SECONDS = 60;
+
     private DatabaseCredentialStore $tokens;
 
     public function __construct(
@@ -25,6 +38,7 @@ final readonly class DatabaseRememberTokenStore
         string $tokenHashColumn = 'token_hash',
         string $purposeColumn = 'token_type',
         string $purpose = DatabaseCredentialStore::PURPOSE_USER_REMEMBER,
+        ?string $audience = null,
         string $expiresDatetimeColumn = 'expires_datetime',
         string $revokedDatetimeColumn = 'revoked_datetime',
         string $lastUsedDatetimeColumn = 'last_used_datetime',
@@ -46,6 +60,7 @@ final readonly class DatabaseRememberTokenStore
             tokenHashColumn: $tokenHashColumn,
             purposeColumn: $purposeColumn,
             purpose: $purpose,
+            audience: $audience,
             expiresDatetimeColumn: $expiresDatetimeColumn,
             revokedDatetimeColumn: $revokedDatetimeColumn,
             lastUsedDatetimeColumn: $lastUsedDatetimeColumn,
@@ -74,6 +89,18 @@ final readonly class DatabaseRememberTokenStore
     public function findValid(string $token, ?ServerRequestInterface $request = null): ?CredentialRecord
     {
         return $this->tokens->findValid($token, $request);
+    }
+
+    /**
+     * Выдаёт новый токен вместо использованного: тот же пользователь, срок и метаданные. Использованный токен
+     * действует ещё {@see self::ROTATION_GRACE_SECONDS} секунд.
+     */
+    public function rotate(string $token, CredentialRecord $record, ?ServerRequestInterface $request = null): IssuedCredential
+    {
+        $issued = $this->tokens->issue($record->subjectId, $record->expiresAt, $record->metadata, $request);
+        $this->tokens->expireAt($token, Clock::now()->modify(sprintf('+%d seconds', self::ROTATION_GRACE_SECONDS)));
+
+        return $issued;
     }
 
     public function revoke(string $token): int

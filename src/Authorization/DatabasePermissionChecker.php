@@ -6,17 +6,27 @@ namespace PhpSoftBox\Auth\Authorization;
 
 use BackedEnum;
 use PhpSoftBox\Auth\Contracts\UserInterface;
+use PhpSoftBox\Clock\Clock;
 use PhpSoftBox\Database\Connection\ConnectionManagerInterface;
 use PhpSoftBox\Database\Contracts\ConnectionInterface;
 
+use function array_key_first;
 use function array_values;
+use function count;
 use function implode;
 use function is_int;
 use function is_string;
 use function sprintf;
 use function trim;
 
-final class DatabasePermissionChecker implements PermissionCheckerInterface
+/**
+ * Права пользователя из таблиц ролей и прав.
+ *
+ * Права пользователя загружаются одним снимком и кешируются в объекте. В долгоживущем процессе снимок устаревает через
+ * `$snapshotTtlSeconds` (отозванная роль перестаёт действовать без перезапуска), а кеш ограничен `$maxSnapshots`
+ * пользователями. {@see UserRoleManager} сбрасывает снимок сразу после изменения ролей.
+ */
+final class DatabasePermissionChecker implements PermissionCheckerInterface, PermissionCacheInterface
 {
     /**
      * @var array<string, true>|null
@@ -29,7 +39,8 @@ final class DatabasePermissionChecker implements PermissionCheckerInterface
      *     role_names: array<string, true>,
      *     direct_permissions: array<string, true>,
      *     role_permissions: array<string, true>,
-     *     allow_all: bool
+     *     allow_all: bool,
+     *     loaded_at: int
      * }>
      */
     private array $grantSnapshots = [];
@@ -44,6 +55,8 @@ final class DatabasePermissionChecker implements PermissionCheckerInterface
         private readonly string $userRolesTable = 'user_roles',
         private readonly string $permissionNameField = 'name',
         private readonly ?RoleDefinitionProviderInterface $roleDefinitions = null,
+        private readonly int $snapshotTtlSeconds = 60,
+        private readonly int $maxSnapshots = 1000,
     ) {
     }
 
@@ -72,6 +85,11 @@ final class DatabasePermissionChecker implements PermissionCheckerInterface
     {
         $this->allowAllRoles  = null;
         $this->grantSnapshots = [];
+    }
+
+    public function forgetUser(int|string $userId): void
+    {
+        unset($this->grantSnapshots[$this->snapshotCacheKey($userId)]);
     }
 
     private function resolveUserId(mixed $user): int|string|null
@@ -103,8 +121,13 @@ final class DatabasePermissionChecker implements PermissionCheckerInterface
     {
         $conn = $this->connections->read($this->connectionName);
         $key  = $this->snapshotCacheKey($userId);
+        $now  = Clock::now()->getTimestamp();
         if (isset($this->grantSnapshots[$key])) {
-            return $this->grantSnapshots[$key];
+            if ($now - $this->grantSnapshots[$key]['loaded_at'] < $this->snapshotTtlSeconds) {
+                return $this->grantSnapshots[$key];
+            }
+
+            unset($this->grantSnapshots[$key]);
         }
 
         $roles    = $this->loadUserRoles($conn, $userId);
@@ -116,11 +139,17 @@ final class DatabasePermissionChecker implements PermissionCheckerInterface
             'direct_permissions' => [],
             'role_permissions'   => [],
             'allow_all'          => $allowAll,
+            'loaded_at'          => $now,
         ];
 
         if (!$allowAll) {
             $snapshot['direct_permissions'] = $this->loadDirectPermissions($conn, $userId);
             $snapshot['role_permissions']   = $this->loadRolePermissions($conn, $roles['ids']);
+        }
+
+        // Самый старый снимок вытесняется: кеш не растёт с числом пользователей воркера.
+        if (count($this->grantSnapshots) >= $this->maxSnapshots) {
+            unset($this->grantSnapshots[array_key_first($this->grantSnapshots)]);
         }
 
         $this->grantSnapshots[$key] = $snapshot;
@@ -146,7 +175,12 @@ final class DatabasePermissionChecker implements PermissionCheckerInterface
     private function loadUserRoles(ConnectionInterface $conn, int|string $userId): array
     {
         $sql = sprintf(
-            'SELECT r.id AS role_id, r.name AS role_name FROM %s ur JOIN %s r ON r.id = ur.role_id WHERE ur.user_id = :user_id',
+            '
+                SELECT r.id AS role_id, r.name AS role_name
+                FROM %s ur
+                JOIN %s r ON r.id = ur.role_id
+                WHERE ur.user_id = :user_id
+            ',
             $conn->table($this->userRolesTable),
             $conn->table($this->rolesTable),
         );
@@ -178,7 +212,12 @@ final class DatabasePermissionChecker implements PermissionCheckerInterface
     private function loadDirectPermissions(ConnectionInterface $conn, int|string $userId): array
     {
         $sql = sprintf(
-            'SELECT p.%s AS permission_name FROM %s up JOIN %s p ON p.id = up.permission_id WHERE up.user_id = :user_id',
+            '
+                SELECT p.%s AS permission_name
+                FROM %s up
+                JOIN %s p ON p.id = up.permission_id
+                WHERE up.user_id = :user_id
+            ',
             $this->permissionNameField,
             $conn->table($this->userPermissionsTable),
             $conn->table($this->permissionsTable),
@@ -206,7 +245,12 @@ final class DatabasePermissionChecker implements PermissionCheckerInterface
         }
 
         $sql = sprintf(
-            'SELECT p.%s AS permission_name FROM %s rp JOIN %s p ON p.id = rp.permission_id WHERE rp.role_id IN (%s)',
+            '
+                SELECT p.%s AS permission_name
+                FROM %s rp
+                JOIN %s p ON p.id = rp.permission_id
+                WHERE rp.role_id IN (%s)
+            ',
             $this->permissionNameField,
             $conn->table($this->rolePermissionsTable),
             $conn->table($this->permissionsTable),

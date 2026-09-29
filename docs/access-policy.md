@@ -148,6 +148,10 @@ final class DocumentAuditAction
 В примере менеджер пройдет по `base.read`. Пользователь с `own.read` пройдет
 только если policy разрешит доступ к subject из `{user}`.
 
+Если для права с subject не определена ни одна policy, доступ запрещается: право
+без проверки объекта давало бы доступ к любому объекту. Без subject (обычная
+проверка роли) policy не нужна.
+
 Policy для route-param subject:
 
 ```php

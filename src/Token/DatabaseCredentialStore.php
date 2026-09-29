@@ -181,6 +181,29 @@ final class DatabaseCredentialStore implements CredentialStoreInterface
             ->execute();
     }
 
+    /**
+     * Сокращает срок действия учётных данных до `$expiresAt` (если он был позже): старый remember-токен после ротации
+     * ещё немного действует для параллельных запросов.
+     */
+    public function expireAt(string $credential, DateTimeInterface $expiresAt): int
+    {
+        $parsed = $this->codec->parse($credential);
+        if ($parsed === null) {
+            return 0;
+        }
+
+        $at = $this->dateToStorage($expiresAt);
+
+        return $this->connections->write($this->connectionName)
+            ->query()
+            ->update($this->table, [$this->expiresDatetimeColumn => $at])
+            ->where($this->selectorColumn . ' = :selector', ['selector' => $parsed->selector])
+            ->where($this->purposeColumn . ' = :purpose', ['purpose' => $this->purpose])
+            ->where($this->audienceCondition(), $this->audienceBindings())
+            ->whereRaw('(' . $this->expiresDatetimeColumn . ' IS NULL OR ' . $this->expiresDatetimeColumn . ' > :expire_at)', ['expire_at' => $at])
+            ->execute();
+    }
+
     public function revokeAllForSubject(int|string $subjectId): int
     {
         return $this->connections->write($this->connectionName)

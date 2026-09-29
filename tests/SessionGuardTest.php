@@ -179,6 +179,62 @@ final class SessionGuardTest extends TestCase
         $this->assertSame(1, $session->regenerateCalls);
     }
 
+    /**
+     * Проверим, что вход меняет session id и сбрасывает CSRF-токен: токен, известный до входа, после него
+     * недействителен.
+     *
+     * @see SessionGuard::login()
+     */
+    #[Test]
+    public function loginRegeneratesSessionAndForgetsCsrfToken(): void
+    {
+        $session = new TrackingSession();
+
+        $session->set('csrf_token', 'known-before-login');
+
+        new SessionGuard($session, $this->users())->attempt(['email' => 'test@example.com', 'password' => 'secret']);
+
+        self::assertSame(1, $session->regenerateCalls);
+        self::assertFalse($session->has('csrf_token'));
+    }
+
+    /**
+     * Проверим, что выход меняет session id и CSRF-токен.
+     *
+     * @see SessionGuard::logout()
+     */
+    #[Test]
+    public function logoutRegeneratesSessionAndForgetsCsrfToken(): void
+    {
+        $session = new TrackingSession();
+
+        $guard = new SessionGuard($session, $this->users());
+
+        $guard->attempt(['email' => 'test@example.com', 'password' => 'secret']);
+        $session->set('csrf_token', 'token-of-logged-in-user');
+
+        $guard->logout();
+
+        self::assertSame(2, $session->regenerateCalls);
+        self::assertFalse($session->has('csrf_token'));
+        self::assertFalse($session->has('auth.user_id'));
+    }
+
+    /**
+     * Проверим, что попытка входа несуществующего пользователя просто отклоняется (пароль при этом проверяется по
+     * фиктивному хешу — время ответа как при неверном пароле).
+     *
+     * @see SessionGuard::attempt()
+     */
+    #[Test]
+    public function attemptWithUnknownUserFails(): void
+    {
+        $session = new TrackingSession();
+
+        self::assertFalse(new SessionGuard($session, $this->users())->attempt(['email' => 'nobody@example.com', 'password' => 'secret']));
+        self::assertSame(0, $session->regenerateCalls);
+    }
+
     private function users(?string $passwordHash = null, ?string $authToken = null): InMemoryUserProvider
     {
         $passwordHash ??= password_hash('secret', PASSWORD_DEFAULT);

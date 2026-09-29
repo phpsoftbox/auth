@@ -13,7 +13,6 @@ use Psr\Http\Message\ServerRequestInterface;
 use Psr\Http\Message\StreamFactoryInterface;
 use Psr\SimpleCache\CacheInterface;
 
-use function explode;
 use function hash;
 use function is_array;
 use function is_int;
@@ -72,8 +71,16 @@ final readonly class AccountProtectionService
         ];
     }
 
+    /**
+     * CAPTCHA требуется после исчерпания попыток, только если она включена: без ключей её нельзя пройти, и вход
+     * блокировался бы по IP (в том числе чужому).
+     */
     public function requiresCaptcha(ServerRequestInterface $request, string $scope): bool
     {
+        if (!$this->isCaptchaEnabled()) {
+            return false;
+        }
+
         $state = $this->state($request, $scope);
 
         return $state['captcha_until'] > $this->now();
@@ -173,30 +180,15 @@ final readonly class AccountProtectionService
         return $scope !== '' ? $scope : self::DEFAULT_SCOPE;
     }
 
+    /**
+     * IP клиента — `REMOTE_ADDR`. За прокси реальный IP туда подставляет middleware доверенных прокси; заголовки
+     * `X-Forwarded-For`/`X-Real-Ip` здесь не читаются — их подделывает сам клиент.
+     */
     private function resolveIp(ServerRequestInterface $request): string
     {
-        $forwardedFor = trim($request->getHeaderLine('X-Forwarded-For'));
-        if ($forwardedFor !== '') {
-            $parts = explode(',', $forwardedFor);
-            $first = trim((string) ($parts[0] ?? ''));
-            if ($first !== '') {
-                return $first;
-            }
-        }
+        $remoteAddr = $request->getServerParams()['REMOTE_ADDR'] ?? null;
 
-        $realIp = trim($request->getHeaderLine('X-Real-Ip'));
-        if ($realIp !== '') {
-            return $realIp;
-        }
-
-        $serverParams = $request->getServerParams();
-        $remoteAddr   = $serverParams['REMOTE_ADDR'] ?? null;
-
-        if (is_string($remoteAddr) && trim($remoteAddr) !== '') {
-            return trim($remoteAddr);
-        }
-
-        return 'unknown';
+        return is_string($remoteAddr) && trim($remoteAddr) !== '' ? trim($remoteAddr) : 'unknown';
     }
 
     private function now(): int

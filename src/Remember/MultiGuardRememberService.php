@@ -44,7 +44,9 @@ final class MultiGuardRememberService
         }
 
         $record = $config->store->findValid($token, $request);
-        if ($record === null) {
+
+        // Токен другого guard (например, `web` в cookie `remember_site`) не восстанавливает вход в этом.
+        if ($record === null || ($record->metadata['area'] ?? null) !== $guard) {
             $config->cookies->queueForget($request);
 
             return false;
@@ -59,6 +61,9 @@ final class MultiGuardRememberService
         }
 
         $config->guard->login($user);
+
+        $rotated = $config->store->rotate($token, $record, $request);
+        $config->cookies->queue($rotated->token, $record->expiresAt, $request);
 
         return true;
     }
