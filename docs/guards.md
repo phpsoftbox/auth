@@ -2,6 +2,11 @@
 
 ## SessionGuard (web)
 
+- При входе и выходе меняется session id и сбрасывается CSRF-токен (ключ `csrfTokenKey`, по умолчанию `csrf_token`):
+  токен, известный до входа, после него недействителен. Новый токен `CsrfMiddleware` отдаёт в ответе на тот же запрос.
+- Попытка входа несуществующего пользователя проверяет пароль по фиктивному хешу (ключ `passwordCredentialKey`,
+  по умолчанию `password`): по времени ответа логины не перебрать.
+
 ```php
 use PhpSoftBox\Auth\Contracts\UserInterface;
 use PhpSoftBox\Auth\Credentials\PasswordCredentialsValidator;
@@ -312,6 +317,18 @@ remember-token и продолжить с session user либо разлогин
 domain вроде `.example.com` нужно задавать явно.
 
 ## Валидация по SMS (OTP)
+
+`CacheOtpValidator` хранит код и попытки в PSR-16 кеше. Пока идентификатор заблокирован после исчерпания попыток,
+`issue()` бросает `OtpLockedException` — новый код блокировку не снимает. PSR-16 не умеет атомарный инкремент:
+параллельные запросы успевают сделать больше попыток. Чтобы лимит нельзя было обойти, передайте `attemptLimiter` с
+атомарным хранилищем — попытка резервируется в нём до сравнения кода:
+
+```php
+use PhpSoftBox\Auth\Otp\CacheOtpValidator;
+use PhpSoftBox\RateLimiter\RedisRateLimiter;
+
+$otp = new CacheOtpValidator($cache, maxAttempts: 3, lockSeconds: 1800, attemptLimiter: new RedisRateLimiter($redis));
+```
 
 ```php
 use PhpSoftBox\Auth\Otp\InMemoryOtpValidator;
