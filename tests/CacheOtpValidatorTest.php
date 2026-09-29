@@ -94,6 +94,16 @@ final class CacheOtpValidatorTest extends TestCase
 
                 return new RateLimitResult($allowed, $maxAttempts, max(0, $maxAttempts - $this->hits[$key]), 60, time() + 60);
             }
+
+            public function attempts(string $key): int
+            {
+                return $this->hits[$key] ?? 0;
+            }
+
+            public function reset(string $key): void
+            {
+                unset($this->hits[$key]);
+            }
         };
 
         $validator = new CacheOtpValidator(new ArrayCache(), new OtpCodeGenerator(), ttlSeconds: 120, maxAttempts: 2, lockSeconds: 60, attemptLimiter: $limiter);
