@@ -146,7 +146,12 @@ final class DatabasePermissionChecker implements PermissionCheckerInterface
     private function loadUserRoles(ConnectionInterface $conn, int|string $userId): array
     {
         $sql = sprintf(
-            'SELECT r.id AS role_id, r.name AS role_name FROM %s ur JOIN %s r ON r.id = ur.role_id WHERE ur.user_id = :user_id',
+            '
+                SELECT r.id AS role_id, r.name AS role_name
+                FROM %s ur
+                JOIN %s r ON r.id = ur.role_id
+                WHERE ur.user_id = :user_id
+            ',
             $conn->table($this->userRolesTable),
             $conn->table($this->rolesTable),
         );
@@ -178,7 +183,12 @@ final class DatabasePermissionChecker implements PermissionCheckerInterface
     private function loadDirectPermissions(ConnectionInterface $conn, int|string $userId): array
     {
         $sql = sprintf(
-            'SELECT p.%s AS permission_name FROM %s up JOIN %s p ON p.id = up.permission_id WHERE up.user_id = :user_id',
+            '
+                SELECT p.%s AS permission_name
+                FROM %s up
+                JOIN %s p ON p.id = up.permission_id
+                WHERE up.user_id = :user_id
+            ',
             $this->permissionNameField,
             $conn->table($this->userPermissionsTable),
             $conn->table($this->permissionsTable),
@@ -206,7 +216,12 @@ final class DatabasePermissionChecker implements PermissionCheckerInterface
         }
 
         $sql = sprintf(
-            'SELECT p.%s AS permission_name FROM %s rp JOIN %s p ON p.id = rp.permission_id WHERE rp.role_id IN (%s)',
+            '
+                SELECT p.%s AS permission_name
+                FROM %s rp
+                JOIN %s p ON p.id = rp.permission_id
+                WHERE rp.role_id IN (%s)
+            ',
             $this->permissionNameField,
             $conn->table($this->rolePermissionsTable),
             $conn->table($this->permissionsTable),

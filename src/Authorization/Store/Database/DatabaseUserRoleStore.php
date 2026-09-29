@@ -61,7 +61,13 @@ final class DatabaseUserRoleStore implements UserRoleStoreInterface
 
         $conn = $this->connections->read($this->connectionName);
         $rows = $conn->fetchAll(
-            "SELECT r.name FROM {$this->userRolesTable} ur JOIN {$this->rolesTable} r ON r.id = ur.role_id WHERE ur.user_id = :user_id ORDER BY r.name",
+            "
+                SELECT r.name
+                FROM {$this->userRolesTable} ur
+                JOIN {$this->rolesTable} r ON r.id = ur.role_id
+                WHERE ur.user_id = :user_id
+                ORDER BY r.name
+            ",
             ['user_id' => $userId],
         );
 

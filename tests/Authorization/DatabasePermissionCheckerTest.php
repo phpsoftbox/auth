@@ -19,7 +19,9 @@ use Psr\Log\LoggerInterface;
 use Stringable;
 
 use function count;
+use function preg_replace;
 use function stripos;
+use function trim;
 
 #[CoversClass(DatabasePermissionChecker::class)]
 final class DatabasePermissionCheckerTest extends TestCase
@@ -270,7 +272,8 @@ final class DatabasePermissionCheckerTest extends TestCase
             {
                 $count = 0;
                 foreach ($this->records as $record) {
-                    $sql = (string) ($record['context']['sql'] ?? '');
+                    // Переносы строк и отступы в SQL не важны: сравниваем с одним пробелом между словами.
+                    $sql = trim((string) preg_replace('/\s+/', ' ', (string) ($record['context']['sql'] ?? '')));
                     if ($sql !== '' && stripos($sql, $needle) !== false) {
                         $count++;
                     }
