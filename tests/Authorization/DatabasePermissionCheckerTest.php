@@ -4,10 +4,12 @@ declare(strict_types=1);
 
 namespace PhpSoftBox\Auth\Tests\Authorization;
 
+use DateTimeImmutable;
 use PhpSoftBox\Auth\Authorization\ArrayRoleDefinitionProvider;
 use PhpSoftBox\Auth\Authorization\DatabasePermissionChecker;
 use PhpSoftBox\Auth\Authorization\RoleDefinition;
 use PhpSoftBox\Auth\Authorization\RoleDefinitionProviderInterface;
+use PhpSoftBox\Clock\Clock;
 use PhpSoftBox\Database\Configurator\DatabaseFactory;
 use PhpSoftBox\Database\Connection\ConnectionManager;
 use PhpSoftBox\Database\SchemaBuilder\TableBlueprint;
@@ -181,10 +183,62 @@ final class DatabasePermissionCheckerTest extends TestCase
         self::assertSame(1, $logger->countSqlContaining('FROM user_roles ur JOIN roles r'));
     }
 
+    /**
+     * Проверим, что в долгоживущем процессе снимок прав устаревает: отозванная роль перестаёт действовать через
+     * `snapshotTtlSeconds`, без перезапуска.
+     *
+     * @see DatabasePermissionChecker::can()
+     */
+    #[Test]
+    public function reloadsSnapshotAfterTtl(): void
+    {
+        Clock::freeze(new DateTimeImmutable('2026-01-01 00:00:00 UTC'));
+
+        $manager = $this->buildConnectionManager();
+        $checker = new DatabasePermissionChecker($manager, snapshotTtlSeconds: 60);
+        $user    = new IdUser(11);
+
+        self::assertTrue($checker->can($user, 'reports.view'));
+
+        // Роль отозвана в БД: в пределах TTL действует снимок, после — новые данные.
+        $manager->connection()->execute('DELETE FROM user_roles WHERE user_id = 11');
+        self::assertTrue($checker->can($user, 'reports.view'));
+
+        Clock::freeze(new DateTimeImmutable('2026-01-01 00:01:00 UTC'));
+        self::assertFalse($checker->can($user, 'reports.view'));
+
+        Clock::reset();
+    }
+
+    /**
+     * Проверим, что forgetUser() сбрасывает снимок прав пользователя сразу.
+     *
+     * @see DatabasePermissionChecker::forgetUser()
+     */
+    #[Test]
+    public function forgetUserDropsSnapshot(): void
+    {
+        $manager = $this->buildConnectionManager();
+        $checker = new DatabasePermissionChecker($manager);
+        $user    = new IdUser(11);
+
+        self::assertTrue($checker->can($user, 'reports.view'));
+
+        $manager->connection()->execute('DELETE FROM user_roles WHERE user_id = 11');
+        $checker->forgetUser(11);
+
+        self::assertFalse($checker->can($user, 'reports.view'));
+    }
+
     private function buildChecker(
         ?RoleDefinitionProviderInterface $definitions = null,
         ?LoggerInterface $logger = null,
     ): DatabasePermissionChecker {
+        return new DatabasePermissionChecker($this->buildConnectionManager($logger), roleDefinitions: $definitions);
+    }
+
+    private function buildConnectionManager(?LoggerInterface $logger = null): ConnectionManager
+    {
         $factory = new DatabaseFactory([
             'connections' => [
                 'default' => 'main',
@@ -235,7 +289,7 @@ final class DatabasePermissionCheckerTest extends TestCase
         $conn->execute('INSERT INTO user_roles (user_id, role_id) VALUES (:user_id, 1)', ['user_id' => 'user-11']);
         $conn->execute('INSERT INTO role_permissions (role_id, permission_id) VALUES (1, 2)');
 
-        return new DatabasePermissionChecker($manager, roleDefinitions: $definitions);
+        return $manager;
     }
 
     private function queryLogger(): object

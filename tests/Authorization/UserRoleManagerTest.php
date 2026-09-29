@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace PhpSoftBox\Auth\Tests\Authorization;
 
+use PhpSoftBox\Auth\Authorization\PermissionCacheInterface;
 use PhpSoftBox\Auth\Authorization\UserRoleManager;
 use PhpSoftBox\Auth\Exception\RoleNotAssignedException;
 use PhpSoftBox\Auth\Exception\RoleNotFoundException;
@@ -102,5 +103,41 @@ final class UserRoleManagerTest extends TestCase
         $manager->assignRole('user-42', 'support');
 
         self::assertSame(['support'], $manager->roles('user-42'));
+    }
+
+    /**
+     * Проверим, что после назначения и снятия роли кеш прав пользователя сбрасывается.
+     *
+     * @see UserRoleManager::assignRole()
+     * @see UserRoleManager::removeRole()
+     */
+    #[Test]
+    public function forgetsPermissionCacheOnRoleChange(): void
+    {
+        $roles     = new UserRoleManagerRoleStore();
+        $userRoles = new UserRoleManagerUserRoleStore();
+        $cache     = new class () implements PermissionCacheInterface {
+            /** @var list<int|string> */
+            public array $forgotten = [];
+
+            public function forgetUser(int|string $userId): void
+            {
+                $this->forgotten[] = $userId;
+            }
+
+            public function reset(): void
+            {
+            }
+        };
+
+        $roles->add('admin', 1);
+        $userRoles->registerRole(1, 'admin');
+
+        $manager = new UserRoleManager($userRoles, $roles, $cache);
+
+        $manager->assignRole(new UserRoleManagerUserId(10), 'admin');
+        $manager->removeRole(new UserRoleManagerUserId(10), 'admin');
+
+        self::assertSame([10, 10], $cache->forgotten);
     }
 }

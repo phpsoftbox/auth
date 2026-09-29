@@ -12,7 +12,6 @@ use Psr\Http\Message\ServerRequestInterface;
 use Psr\Http\Message\StreamFactoryInterface;
 use Throwable;
 
-use function explode;
 use function hash_equals;
 use function http_build_query;
 use function is_array;
@@ -154,24 +153,12 @@ final readonly class YandexSmartCaptchaVerifier implements CaptchaVerifierInterf
         return trim($host, '.');
     }
 
+    /**
+     * IP клиента — `REMOTE_ADDR` (за прокси его подставляет middleware доверенных прокси).
+     */
     private function clientIp(ServerRequestInterface $request): string
     {
-        $forwardedFor = trim($request->getHeaderLine('X-Forwarded-For'));
-        if ($forwardedFor !== '') {
-            $parts = explode(',', $forwardedFor);
-            $first = trim((string) ($parts[0] ?? ''));
-            if ($first !== '') {
-                return $first;
-            }
-        }
-
-        $realIp = trim($request->getHeaderLine('X-Real-Ip'));
-        if ($realIp !== '') {
-            return $realIp;
-        }
-
-        $server = $request->getServerParams();
-        $ip     = $server['REMOTE_ADDR'] ?? '';
+        $ip = $request->getServerParams()['REMOTE_ADDR'] ?? '';
 
         return is_string($ip) ? trim($ip) : '';
     }

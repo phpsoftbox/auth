@@ -61,7 +61,8 @@ final class YandexSmartCaptchaVerifierTest extends TestCase
         parse_str((string) $client->lastRequest->getBody(), $payload);
         self::assertSame('server-key', $payload['secret'] ?? null);
         self::assertSame('token-1', $payload['token'] ?? null);
-        self::assertSame('203.0.113.10', $payload['ip'] ?? null);
+        // X-Forwarded-For из запроса не учитывается: IP — REMOTE_ADDR.
+        self::assertSame('127.0.0.1', $payload['ip'] ?? null);
     }
 
     #[Test]

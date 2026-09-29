@@ -78,4 +78,35 @@ final class IntendedUrlStoreTest extends TestCase
 
         self::assertSame('/fallback', $store->pull('/fallback'));
     }
+
+    /**
+     * Проверим, что путь вида `//evil.com/x` не сохраняется: браузер понимает его как адрес другого хоста.
+     *
+     * @see IntendedUrlStore::remember()
+     */
+    #[Test]
+    public function rememberSkipsProtocolRelativePath(): void
+    {
+        $session = new TrackingSession();
+
+        new IntendedUrlStore($session)->remember(new ServerRequest('GET', 'https://example.test//evil.com/x'));
+
+        self::assertFalse($session->has('auth.intended'));
+    }
+
+    /**
+     * Проверим, что внешний адрес, попавший в сессию, не возвращается — вместо него fallback.
+     *
+     * @see IntendedUrlStore::pull()
+     */
+    #[Test]
+    public function pullIgnoresExternalUrl(): void
+    {
+        $session = new TrackingSession();
+
+        $session->set('auth.intended', '/\\evil.com/x');
+
+        self::assertSame('/dashboard', new IntendedUrlStore($session)->pull('/dashboard'));
+        self::assertFalse($session->has('auth.intended'));
+    }
 }

@@ -58,6 +58,8 @@ final class AccountProtectionServiceTest extends TestCase
     {
         $request = $this->request();
         $service = $this->createService(config: new AccountProtectionConfig(
+            captchaSiteKey: 'site-key',
+            captchaSecretKey: 'secret-key',
             maxAttempts: 4,
             captchaSeconds: 120,
             scopes: [
@@ -90,6 +92,8 @@ final class AccountProtectionServiceTest extends TestCase
     {
         $request = $this->request();
         $service = $this->createService(config: new AccountProtectionConfig(
+            captchaSiteKey: 'site-key',
+            captchaSecretKey: 'secret-key',
             maxAttempts: 1,
             captchaSeconds: 120,
             scopes: [
@@ -120,6 +124,8 @@ final class AccountProtectionServiceTest extends TestCase
     {
         $request = $this->request();
         $service = $this->createService(config: new AccountProtectionConfig(
+            captchaSiteKey: 'site-key',
+            captchaSecretKey: 'secret-key',
             maxAttempts: 3,
             captchaSeconds: 120,
             scopes: [
@@ -154,6 +160,8 @@ final class AccountProtectionServiceTest extends TestCase
     {
         $request = $this->request();
         $service = $this->createService(config: new AccountProtectionConfig(
+            captchaSiteKey: 'site-key',
+            captchaSecretKey: 'secret-key',
             maxAttempts: 2,
             captchaSeconds: 120,
             scopes: [
@@ -251,13 +259,14 @@ final class AccountProtectionServiceTest extends TestCase
     }
 
     /**
-     * Проверяет отказ валидации, если CAPTCHA обязательна, но не настроена.
+     * Проверяет, что без ключей CAPTCHA не требуется и не блокирует вход: пройти её нельзя, и после N ошибок вход по IP
+     * (в том числе чужому) блокировался бы навсегда.
      *
-     * @see AccountProtectionService::isCaptchaEnabled()
+     * @see AccountProtectionService::requiresCaptcha()
      * @see AccountProtectionService::validateCaptcha()
      */
     #[Test]
-    public function validateCaptchaFailsWhenCaptchaIsNotConfigured(): void
+    public function captchaIsNotRequiredWhenNotConfigured(): void
     {
         $request = $this->request();
         $service = $this->createService(config: new AccountProtectionConfig(
@@ -267,19 +276,20 @@ final class AccountProtectionServiceTest extends TestCase
 
         $service->registerFailure($request, 'admin.login');
         self::assertFalse($service->isCaptchaEnabled());
-        self::assertFalse($service->validateCaptcha($request, 'token-value', 'admin.login'));
+        self::assertFalse($service->requiresCaptcha($request, 'admin.login'));
+        self::assertTrue($service->validateCaptcha($request, '', 'admin.login'));
     }
 
     /**
      * Проверяет успешную валидацию:
      * - отправка на verify endpoint,
      * - корректный body payload,
-     * - выбор первого IP из X-Forwarded-For.
+     * - IP клиента из REMOTE_ADDR: X-Forwarded-For подделывается клиентом и не учитывается.
      *
      * @see AccountProtectionService::validateCaptcha()
      */
     #[Test]
-    public function validateCaptchaSendsExpectedPayloadAndUsesForwardedIp(): void
+    public function validateCaptchaSendsExpectedPayloadAndIgnoresForwardedIp(): void
     {
         $request = $this->request(headers: ['X-Forwarded-For' => '10.20.30.40, 10.0.0.1']);
         $client  = new RecordingHttpClient(new Response(200, [], '{"status":"ok","host":"example.com"}'));
@@ -306,7 +316,7 @@ final class AccountProtectionServiceTest extends TestCase
         parse_str((string) $client->lastRequest->getBody(), $payload);
         self::assertSame('secret-key', $payload['secret'] ?? null);
         self::assertSame('token-123', $payload['token'] ?? null);
-        self::assertSame('10.20.30.40', $payload['ip'] ?? null);
+        self::assertSame('127.0.0.1', $payload['ip'] ?? null);
     }
 
     /**

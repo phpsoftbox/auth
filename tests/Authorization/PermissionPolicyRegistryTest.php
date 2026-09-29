@@ -93,4 +93,18 @@ final class PermissionPolicyRegistryTest extends TestCase
         self::assertTrue($registry->allows(new stdClass(), 'posts.base.read'));
         self::assertFalse($registry->allows(new stdClass(), 'posts.base.delete'));
     }
+
+    /**
+     * Проверим, что право с subject без policy запрещает доступ: иначе право дало бы доступ к любому объекту.
+     *
+     * @see PermissionPolicyRegistry::decide()
+     */
+    #[Test]
+    public function deniesSubjectWithoutPolicy(): void
+    {
+        $registry = new PermissionPolicyRegistry();
+
+        self::assertFalse($registry->decide(new stdClass(), 'posts.own.update', new stdClass())->isAllowed());
+        self::assertTrue($registry->decide(new stdClass(), 'posts.own.update')->isAllowed());
+    }
 }

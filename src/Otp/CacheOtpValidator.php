@@ -4,14 +4,27 @@ declare(strict_types=1);
 
 namespace PhpSoftBox\Auth\Otp;
 
+use PhpSoftBox\Auth\Exception\OtpLockedException;
+use PhpSoftBox\RateLimiter\RateLimiterInterface;
 use Psr\SimpleCache\CacheInterface;
 
+use function bin2hex;
 use function hash_equals;
 use function is_array;
 use function is_string;
 use function max;
+use function random_bytes;
 use function time;
 
+/**
+ * Одноразовые коды в PSR-16 кеше.
+ *
+ * Попытки считаются в payload кода, но PSR-16 не умеет атомарно увеличивать счётчик: N параллельных запросов успевают
+ * сделать N попыток. Чтобы лимит нельзя было обойти параллельными запросами, передайте `$attemptLimiter` с атомарным
+ * хранилищем (например, `RedisRateLimiter`): попытка резервируется в нём до сравнения кода.
+ *
+ * Пока идентификатор заблокирован, новый код не выдаётся — {@see OtpLockedException}.
+ */
 final class CacheOtpValidator implements OtpValidatorInterface
 {
     public function __construct(
@@ -21,12 +34,20 @@ final class CacheOtpValidator implements OtpValidatorInterface
         private readonly int $maxAttempts = 3,
         private readonly int $lockSeconds = 1800,
         private readonly string $prefix = 'otp',
+        private readonly ?RateLimiterInterface $attemptLimiter = null,
     ) {
     }
 
     public function issue(string $identifier, ?int $length = null): OtpState
     {
-        $now       = time();
+        $now = time();
+
+        // Новый код не снимает блокировку после исчерпания попыток.
+        $lockedUntil = $this->lockedUntil($this->payload($identifier));
+        if ($lockedUntil !== null && $lockedUntil > $now) {
+            throw new OtpLockedException($lockedUntil);
+        }
+
         $ttl       = max(1, $this->ttlSeconds);
         $expiresAt = $now + $ttl;
         $code      = $this->generator->generate($length ?? 6);
@@ -36,6 +57,7 @@ final class CacheOtpValidator implements OtpValidatorInterface
             'attempts'         => 0,
             'expires_datetime' => $expiresAt,
             'locked_until'     => null,
+            'nonce'            => $this->nonce(),
         ];
 
         $this->cache->set($this->key($identifier), $payload, $ttl);
@@ -77,14 +99,27 @@ final class CacheOtpValidator implements OtpValidatorInterface
             return false;
         }
 
+        // Попытка резервируется атомарно до сравнения: параллельные запросы сверх лимита не проверяют код вовсе.
+        if ($this->attemptLimiter !== null) {
+            $reserved = $this->attemptLimiter->hit(
+                $this->key($identifier) . '.' . (string) ($payload['nonce'] ?? ''),
+                max(1, $this->maxAttempts),
+                max(1, $this->ttlSeconds, $this->lockSeconds),
+            );
+
+            if (!$reserved->allowed) {
+                $this->lock($identifier, $payload, $now);
+
+                return false;
+            }
+        }
+
         if (!hash_equals($expected, $code)) {
             $attempts            = (int) ($payload['attempts'] ?? 0) + 1;
             $payload['attempts'] = $attempts;
 
             if ($attempts >= $this->maxAttempts) {
-                $payload['locked_until']     = $now + max(1, $this->lockSeconds);
-                $payload['expires_datetime'] = $payload['locked_until'];
-                $this->cache->set($this->key($identifier), $payload, max(1, $this->lockSeconds));
+                $this->lock($identifier, $payload, $now);
 
                 return false;
             }
@@ -126,7 +161,33 @@ final class CacheOtpValidator implements OtpValidatorInterface
 
         $payload['attempts']     = 0;
         $payload['locked_until'] = null;
+        // Новый nonce — новый счётчик в $attemptLimiter.
+        $payload['nonce'] = $this->nonce();
         $this->storePayload($identifier, $payload, time());
+    }
+
+    /**
+     * @param array<string, mixed> $payload
+     */
+    private function lock(string $identifier, array $payload, int $now): void
+    {
+        $payload['attempts']         = max((int) ($payload['attempts'] ?? 0), $this->maxAttempts);
+        $payload['locked_until']     = $now + max(1, $this->lockSeconds);
+        $payload['expires_datetime'] = $payload['locked_until'];
+        $this->cache->set($this->key($identifier), $payload, max(1, $this->lockSeconds));
+    }
+
+    /**
+     * @param array<string, mixed>|null $payload
+     */
+    private function lockedUntil(?array $payload): ?int
+    {
+        return isset($payload['locked_until']) ? (int) $payload['locked_until'] : null;
+    }
+
+    private function nonce(): string
+    {
+        return bin2hex(random_bytes(8));
     }
 
     private function key(string $identifier): string

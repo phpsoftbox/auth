@@ -58,8 +58,12 @@ final class PermissionPolicyRegistry
         $permission = PermissionName::normalize($permission);
 
         $rules = $this->resolvePolicies($permission);
+
+        // Без policy право действует только без subject: проверку доступа к конкретному объекту нельзя пропустить.
         if ($rules === []) {
-            return AccessDecision::allow();
+            return $subject === null
+                ? AccessDecision::allow()
+                : AccessDecision::deny('No policy for permission with subject: ' . $permission);
         }
 
         foreach ($rules as $rule) {
