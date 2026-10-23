@@ -1,5 +1,49 @@
 # Guard
 
+## Пользователь текущего запроса
+
+`AbstractGuardRequestUserResolver` сначала ищет `UserInterface` в атрибуте
+текущего запроса (`user` по умолчанию), затем обращается к выбранному guard.
+Для resolver, который живёт столько же, сколько один HTTP-запрос, можно
+передать `request` в конструктор, как раньше.
+
+Если контейнер сохраняет resolver между запросами, передайте вместо объекта
+запроса `requestProvider`. Он вызывается при каждом `resolve()` и должен
+возвращать **текущий** `ServerRequestInterface`:
+
+```php
+use PhpSoftBox\Auth\Manager\AuthManager;
+use PhpSoftBox\Auth\Resolver\AbstractGuardRequestUserResolver;
+use Psr\Http\Message\ServerRequestInterface;
+
+final readonly class WebRequestUserResolver extends AbstractGuardRequestUserResolver
+{
+    public function __construct(AuthManager $auth, callable $currentRequest)
+    {
+        parent::__construct(auth: $auth, requestProvider: $currentRequest);
+    }
+
+    protected function guardName(): string
+    {
+        return 'web';
+    }
+}
+
+$resolver = new WebRequestUserResolver(
+    $auth,
+    static fn (): ServerRequestInterface => $requestScope->currentRequest(),
+);
+```
+
+Здесь `$requestScope` — объект приложения, который хранит запрос только в пределах
+текущего HTTP-вызова и обновляется перед следующим вызовом.
+
+Источник запроса сам должен обновляться для каждого HTTP-запроса. Замена
+объекта на `fn () => $container->get(ServerRequestInterface::class)` не поможет,
+если контейнер возвращает тот же закешированный запрос. Если provider не
+возвращает запрос, resolver выбрасывает исключение и не подставляет старый
+`request`: так пользователь предыдущего запроса не попадёт в следующий.
+
 ## SessionGuard (web)
 
 - При входе и выходе меняется session id и сбрасывается CSRF-токен (ключ `csrfTokenKey`, по умолчанию `csrf_token`):
